@@ -1,0 +1,26 @@
+name: Update Sponsors List
+on:
+  schedule:
+    - cron: "0 0 * * *" # อัปเดตทุกวัน
+  workflow_dispatch:
+
+jobs:
+  update-sponsors:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        
+      - name: Fetch sponsors list
+        uses: JamesIves/github-sponsors-readme-action@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          file: "README.md"
+        
+      - name: Commit and push changes
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions@users.noreply.github.com"
+          git add README.md
+          git commit -m "Update sponsors list"
+          git push
