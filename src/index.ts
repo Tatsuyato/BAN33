@@ -5,13 +5,15 @@ import Fastify from "fastify";
 import cron from "node-cron";
 import { fileURLToPath } from "url";
 import fastifyMultipart from "@fastify/multipart";
+import formbody from '@fastify/formbody';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = join(__filename, "..");
 
-const DB_PATH = join(__dirname, "db.json");
-const SETTINGS_PATH = join(__dirname, "settings.json");
-const TOKEN_PATH = join(__dirname, "token.json");
+const DB_PATH = join(__dirname, "data", "db.json");
+const SETTINGS_PATH = join(__dirname, "config", "settings.json");
+const TOKEN_PATH = join(__dirname, "config", "token.json");
+
 const SPAM_KEYWORDS = [/\bMAX ?33\b/i];
 
 interface Comment {
@@ -37,9 +39,8 @@ interface Settings {
 }
 
 const fastify = Fastify({ logger: true });
-fastify.register(fastifyMultipart, {
-    limits: { fileSize: 1024 * 1024 }, // 1MB limit
-});
+fastify.register(fastifyMultipart);
+fastify.register(formbody);
 
 async function loadDB(): Promise<{ comments: Comment[]; stats: SpamStats }> {
     try {
@@ -262,11 +263,7 @@ fastify.get("/oauth2callback", async (request, reply) => {
         await writeFile(TOKEN_PATH, JSON.stringify(tokens, null, 2));
         fastify.log.info("Token stored to", TOKEN_PATH);
 
-        return reply.send(`
-            <h1>Authentication Successful!</h1>
-            <p>You can now close this window and return to the application.</p>
-            <a href="/">Go to Dashboard</a>
-        `);
+        return reply.redirect("/");
     } catch (error) {
         fastify.log.error("Error saving token:", error);
         return reply.status(500).send(`Authentication failed: ${error}`);
@@ -375,18 +372,6 @@ fastify.get("/", async (request, reply) => {
 fastify.get("/setup", async (_, reply) => {
     const settings = await loadSettings();
     let authButton = "";
-    if (settings.clientId && settings.clientSecret) {
-        const oAuth2Client = new google.auth.OAuth2(
-            settings.clientId,
-            settings.clientSecret,
-            "http://localhost:3000/oauth2callback"
-        );
-        const authUrl = oAuth2Client.generateAuthUrl({
-            access_type: "offline",
-            scope: ["https://www.googleapis.com/auth/youtube.force-ssl"],
-        });
-        authButton = `<a href="${authUrl}" class="auth-btn">Authorize with Google</a>`;
-    }
 
     return reply.type("text/html").send(`
         <!DOCTYPE html>
@@ -482,6 +467,8 @@ fastify.post("/setup", async (request, reply) => {
         schedule: `${scheduleMinute || "*"} ${scheduleHour || "*"} * * ${scheduleDay || "*"}`,
     };
 
+    console.log(settings)
+
     await saveSettings(settings);
 
     const cronExpression = settings.schedule || "* * * * *";
@@ -493,7 +480,22 @@ fastify.post("/setup", async (request, reply) => {
     cron.schedule(cronExpression, autoFetchComments);
     fastify.log.info("Cron job scheduled with:", cronExpression);
 
-    return reply.redirect("/setup"); // Redirect back to setup to show the auth button
+    if (await readFile(TOKEN_PATH).catch(() => null)) {
+        return reply.redirect("/");
+    } else {
+        const oAuth2Client = new google.auth.OAuth2(
+            settings.clientId,
+            settings.clientSecret,
+            "http://localhost:3000/oauth2callback"
+        );
+        const authUrl = oAuth2Client.generateAuthUrl({
+            access_type: "offline",
+            scope: ["https://www.googleapis.com/auth/youtube.force-ssl"],
+        });
+    
+        return reply.redirect(`${authUrl}`); // Redirect back to setup to show the auth button
+    }
+    
 });
 
 async function startServer() {
