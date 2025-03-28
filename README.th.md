@@ -1,3 +1,14 @@
+
+# MAX 33 Comment Manager
+
+<div align="center">
+
+[![English](https://img.shields.io/badge/lang-English-blue?style=for-the-badge&logo=github)](README.en.md)
+[![ภาษาไทย](https://img.shields.io/badge/lang-ภาษาไทย-brightgreen?style=for-the-badge&logo=github)](README.th.md)
+
+</div>
+
+
 # MAX 33 Comment Manager
 
 เครื่องมือง่ายๆ สำหรับจัดการและตรวจสอบคอมเมนต์บน YouTube ออกแบบมาเพื่อตรวจจับและจัดการคอมเมนต์สแปม "MAX 33" โดยเฉพาะ เพียงรันไฟล์ `Run.exe` เตรียม Google API Key และ YouTube Channel ID แล้วเริ่มใช้งานได้เลย!
