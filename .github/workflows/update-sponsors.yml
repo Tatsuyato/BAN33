@@ -10,14 +10,28 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
-        
+        with:
+          fetch-depth: 0  # ดึงประวัติทั้งหมดของ repo
+
       - name: Fetch sponsors list
         uses: JamesIves/github-sponsors-readme-action@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           file: "README.md"
         
+      - name: Check if there are changes
+        id: check_changes
+        run: |
+          if git diff --quiet README.md; then
+            echo "No changes detected."
+            echo "should_commit=false" >> $GITHUB_ENV
+          else
+            echo "Changes detected."
+            echo "should_commit=true" >> $GITHUB_ENV
+          fi
+
       - name: Commit and push changes
+        if: env.should_commit == 'true'
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions@users.noreply.github.com"
