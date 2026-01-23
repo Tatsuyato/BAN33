@@ -23,7 +23,7 @@ const FILES = {
     token: join(DIRS.config, "token.json")
 };
 
-// Regex สำหรับกรองคำหยาบหรือสแปม (เพิ่มลดได้ตามสะดวก)
+// Regex for filtering spam
 const SPAM_KEYWORDS = [
     /\bMAX ?33\b/i,
     /รับงาน/i,
@@ -65,11 +65,9 @@ interface Settings {
 // --- UTILITIES (DB & FILE MANAGER) ---
 class DataManager {
     static async init() {
-        // สร้างโฟลเดอร์ถ้ายังไม่มี
         for (const dir of Object.values(DIRS)) {
             if (!existsSync(dir)) await mkdir(dir, { recursive: true });
         }
-        // สร้างไฟล์ DB เริ่มต้นถ้ายังไม่มี
         if (!existsSync(FILES.db)) await this.saveDB({ comments: [], stats: {} });
         if (!existsSync(FILES.settings)) await this.saveSettings({});
     }
@@ -129,7 +127,6 @@ class YouTubeService {
         const tokens = await DataManager.loadToken();
         if (tokens) {
             client.setCredentials(tokens);
-            // Auto Refresh Token Logic
             if (tokens.expiry_date && Date.now() >= tokens.expiry_date) {
                 try {
                     const { credentials } = await client.refreshAccessToken();
@@ -146,13 +143,16 @@ class YouTubeService {
 
     static async fetchVideos(channelId: string, apiKey: string) {
         const youtube = google.youtube({ version: "v3", auth: apiKey });
+        
+        // FIX: 'part' and 'type' should be string arrays to match TypeScript overload
         const res = await youtube.search.list({
-            part: ["snippet"],
+            part: ["snippet"], 
             channelId,
-            maxResults: 10, // เพิ่มจำนวนวิดีโอที่เช็ค
+            maxResults: 10,
             order: "date",
-            type: "video"
+            type: ["video"] 
         });
+
         return res.data.items?.map(item => ({
             id: item.id?.videoId!,
             title: item.snippet?.title || "Unknown Title"
@@ -165,16 +165,13 @@ class YouTubeService {
         console.log("🚀 Starting comment scan...");
         const db = await DataManager.loadDB();
         const authClient = await this.getOAuthClient(settings);
-        // ใช้ OAuth client สำหรับการจัดการ comment (เช่น ลบ/ซ่อน)
         const youtubeAuth = google.youtube({ version: "v3", auth: authClient });
-        // ใช้ API Key สำหรับการดึงข้อมูลทั่วไป (ประหยัด Quota OAuth)
         const youtubePublic = google.youtube({ version: "v3", auth: settings.apiKey });
 
         const videos = await this.fetchVideos(settings.channelId, settings.apiKey);
         
         let newSpamCount = 0;
 
-        // Process videos in parallel (ระวัง Rate Limit ถ้าวิดีโอเยอะเกินไป)
         for (const video of videos) {
             try {
                 const res = await youtubePublic.commentThreads.list({
@@ -193,7 +190,6 @@ class YouTubeService {
                     const commentId = item.id!;
                     const text = topComment.textDisplay || "";
                     
-                    // เช็คว่าเคยบันทึกไปแล้วหรือยัง
                     if (db.comments.some(c => c.id === commentId)) continue;
 
                     const isSpam = SPAM_KEYWORDS.some(regex => regex.test(text));
@@ -213,7 +209,6 @@ class YouTubeService {
 
                     if (isSpam) {
                         newSpamCount++;
-                        // Action: Hold for Review (ซ่อนคอมเมนต์)
                         try {
                             await youtubeAuth.comments.setModerationStatus({
                                 id: [commentId],
@@ -221,9 +216,10 @@ class YouTubeService {
                             });
                             console.log(`🚫 Marked SPAM: ${text} (User: ${commentData.user})`);
                             
-                            // Update Stats
-                            const date = new Date().toISOString().split("T")[0];
+                            // FIX: Ensure date is strictly a string for indexing
+                            const date = new Date().toISOString().split("T")[0] as string;
                             const hour = new Date().getHours().toString();
+                            
                             db.stats[date] = db.stats[date] || {};
                             db.stats[date][hour] = (db.stats[date][hour] || 0) + 1;
 
@@ -251,7 +247,6 @@ fastify.register(formbody);
 
 // --- ROUTES ---
 
-// 1. Dashboard UI
 fastify.get("/", async (req, reply) => {
     const settings = await DataManager.loadSettings();
     if (!settings.apiKey || !settings.channelId) return reply.redirect("/setup");
@@ -261,10 +256,9 @@ fastify.get("/", async (req, reply) => {
     const spamComments = db.comments.filter(c => c.isSpam).length;
     const spamPercentage = totalComments > 0 ? ((spamComments / totalComments) * 100).toFixed(1) : "0";
     
-    // เรียงลำดับโชว์ล่าสุดก่อน
     const commentsHtml = db.comments
         .sort((a, b) => b.timestamp - a.timestamp)
-        .slice(0, 50) // โชว์แค่ 50 รายการล่าสุดป้องกันหน้าเว็บอืด
+        .slice(0, 50)
         .map(c => `
             <tr class="hover:bg-gray-50 ${c.isSpam ? 'bg-red-50' : ''}">
                 <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${c.user}</td>
@@ -366,11 +360,9 @@ fastify.get("/", async (req, reply) => {
     return reply.type("text/html").send(html);
 });
 
-// 2. Setup Page
 fastify.get("/setup", async (req, reply) => {
     const settings = await DataManager.loadSettings();
     
-    // Generate Auth URL logic locally for the view
     let authUrl = "#";
     let authStatus = `<span class="text-red-500">Not Connected</span>`;
     
@@ -383,6 +375,7 @@ fastify.get("/setup", async (req, reply) => {
         } catch (e) { console.log(e); }
     }
 
+    // FIX: Converted comparisons to match string types (.toString())
     const html = `
     <!DOCTYPE html>
     <html lang="en">
@@ -424,8 +417,8 @@ fastify.get("/setup", async (req, reply) => {
                 <div class="bg-gray-50 p-4 rounded-md">
                     <label class="block text-sm font-medium text-gray-700 mb-2">Cron Schedule</label>
                     <div class="grid grid-cols-3 gap-4">
-                        <select name="scheduleMinute" class="border p-2 rounded">${Array.from({length:60}, (_,i) => `<option value="${i}" ${settings.schedule?.split(' ')[0] == i ? 'selected':''}>Minute: ${i}</option>`).join('')}<option value="*" ${settings.schedule?.startsWith('*')?'selected':''}>Every Minute</option></select>
-                        <select name="scheduleHour" class="border p-2 rounded"><option value="*">Every Hour</option>${Array.from({length:24}, (_,i) => `<option value="${i}" ${settings.schedule?.split(' ')[1] == i ? 'selected':''}>Hour: ${i}</option>`).join('')}</select>
+                        <select name="scheduleMinute" class="border p-2 rounded">${Array.from({length:60}, (_,i) => `<option value="${i}" ${settings.schedule?.split(' ')[0] == i.toString() ? 'selected':''}>Minute: ${i}</option>`).join('')}<option value="*" ${settings.schedule?.startsWith('*')?'selected':''}>Every Minute</option></select>
+                        <select name="scheduleHour" class="border p-2 rounded"><option value="*">Every Hour</option>${Array.from({length:24}, (_,i) => `<option value="${i}" ${settings.schedule?.split(' ')[1] == i.toString() ? 'selected':''}>Hour: ${i}</option>`).join('')}</select>
                         <select name="scheduleDay" class="border p-2 rounded"><option value="*">Every Day</option><option value="1">Monday</option><option value="5">Friday</option></select>
                     </div>
                 </div>
@@ -449,7 +442,6 @@ fastify.get("/setup", async (req, reply) => {
     return reply.type("text/html").send(html);
 });
 
-// 3. Save Setup
 fastify.post("/setup", async (req, reply) => {
     const body: any = req.body;
     const schedule = `${body.scheduleMinute || "*"} ${body.scheduleHour || "*"} * * ${body.scheduleDay || "*"}`;
@@ -462,13 +454,11 @@ fastify.post("/setup", async (req, reply) => {
         schedule
     });
 
-    // Update Cron Job
     initCron();
 
     return reply.redirect("/setup");
 });
 
-// 4. OAuth Callback
 fastify.get("/oauth2callback", async (req, reply) => {
     const { code } = req.query as any;
     if (!code) return reply.send("Error: No code provided");
@@ -484,7 +474,6 @@ fastify.get("/oauth2callback", async (req, reply) => {
     }
 });
 
-// 5. Manual Trigger Scan
 fastify.post("/trigger-scan", async (req, reply) => {
     const settings = await DataManager.loadSettings();
     try {
@@ -496,7 +485,8 @@ fastify.post("/trigger-scan", async (req, reply) => {
 });
 
 // --- CRON JOB MANAGEMENT ---
-let cronTask: cron.ScheduledTask | null = null;
+// FIX: Using ReturnType to get the correct type from the library
+let cronTask: ReturnType<typeof cron.schedule> | null = null;
 
 async function initCron() {
     const settings = await DataManager.loadSettings();
